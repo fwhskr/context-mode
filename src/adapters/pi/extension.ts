@@ -405,11 +405,18 @@ export function resolvePiWorkspaceDir(opts: {
 }): string {
   const home = opts.home ?? homedir();
   const piConfigDir = join(home, ".pi");
+  const piWorktreesDir = join(piConfigDir, ".worktrees");
+  // Match both POSIX (/) and Windows (\) child-of relations.
+  const isChildOf = (p: string, dir: string): boolean =>
+    p.startsWith(dir + "/") || p.startsWith(dir + "\\");
+  // ~/.pi/agent, ~/.pi/sessions and every other Pi config/state path is never a
+  // workspace. The live-stack project root (~/.pi) and its linked worktrees
+  // (~/.pi/.worktrees/<lane>) are real projects and are attributed to themselves (TASK-121).
   const isUnderPi = (p: string | undefined): boolean => {
     if (!p) return true;
-    if (p === piConfigDir) return true;
-    // Match both POSIX (/) and Windows (\) child-of relations.
-    return p.startsWith(piConfigDir + "/") || p.startsWith(piConfigDir + "\\");
+    if (p === piConfigDir) return false;
+    if (isChildOf(p, piWorktreesDir)) return false;
+    return isChildOf(p, piConfigDir);
   };
   const candidates = [
     opts.env.PI_WORKSPACE_DIR,

@@ -9,8 +9,9 @@
  *   3. PWD (shell-set)
  *   4. cwd (last resort)
  *
- * It NEVER returns a path equal to or under `~/.pi/` — even if PI_CONFIG_DIR
- * is set, since that's the config dir, not the workspace.
+ * It NEVER returns a path under Pi's config/state tree (`~/.pi/agent`, `~/.pi/sessions`,
+ * ...) — even if PI_CONFIG_DIR is set. The live-stack project root `~/.pi` and its
+ * linked worktrees `~/.pi/.worktrees/<lane>` are real workspaces (TASK-121).
  */
 
 import { describe, it, expect } from "vitest";
@@ -64,23 +65,49 @@ describe("resolvePiWorkspaceDir — issue #545 (project dir, not config dir)", (
     expect(result).toBe("/Users/x/cwd-fallback");
   });
 
-  it("never returns the Pi config dir even if the cascade somehow lands there", () => {
-    // Adversarial: every input points at ~/.pi/. The function must reject
-    // and walk through to a safe final state — caller's cwd is the worst-
-    // case anchor; if even that is ~/.pi/, fall back to homedir.
+  it("never returns the Pi config/state tree even if the cascade somehow lands there", () => {
+    // Adversarial: every input points inside ~/.pi/agent (Pi's config tree).
+    // The function must reject and walk through to a safe final state — if
+    // even the caller's cwd is config, fall back to homedir.
+    const configTree = join(PI_CONFIG_DIR, "agent");
     const result = resolvePiWorkspaceDir({
       env: {
-        PI_WORKSPACE_DIR: PI_CONFIG_DIR,
-        PI_PROJECT_DIR: join(PI_CONFIG_DIR, "subdir"),
+        PI_WORKSPACE_DIR: configTree,
+        PI_PROJECT_DIR: join(configTree, "subdir"),
       },
+      pwd: configTree,
+      cwd: configTree,
+    });
+    expect(result).toBe(homedir());
+  });
+
+  it("attributes the live-stack project root ~/.pi to itself (TASK-121)", () => {
+    const result = resolvePiWorkspaceDir({
+      env: {},
       pwd: PI_CONFIG_DIR,
       cwd: PI_CONFIG_DIR,
     });
-    // We cannot return "" or throw — caller wants a usable string.
-    // Implementation contract: return homedir() as a non-config safe anchor.
-    expect(result).not.toBe(PI_CONFIG_DIR);
-    expect(result.startsWith(PI_CONFIG_DIR + "/")).toBe(false);
-    expect(result.startsWith(PI_CONFIG_DIR)).toBe(false);
+    expect(result).toBe(PI_CONFIG_DIR);
+  });
+
+  it("attributes a linked worktree under ~/.pi/.worktrees to itself (TASK-121)", () => {
+    const lane = join(PI_CONFIG_DIR, ".worktrees", "task-121-fix");
+    const result = resolvePiWorkspaceDir({
+      env: {},
+      pwd: lane,
+      cwd: lane,
+    });
+    expect(result).toBe(lane);
+  });
+
+  it("keeps Pi state subtrees isolated when they are the session cwd (TASK-121)", () => {
+    const sessions = join(PI_CONFIG_DIR, "sessions", "abc");
+    const result = resolvePiWorkspaceDir({
+      env: {},
+      pwd: sessions,
+      cwd: sessions,
+    });
+    expect(result).toBe(homedir());
   });
 
   it("never returns a path UNDER ~/.pi/ from PI_WORKSPACE_DIR", () => {
